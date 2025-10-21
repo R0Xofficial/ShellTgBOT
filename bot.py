@@ -93,9 +93,11 @@ async def run_shell_in_background(
     await feedback_message.delete()
 
     return_code_info = f"(Return Code: <code>{process.returncode if process else 'N/A'}</code>)"
+    
+    # --- FIX: Made the user's name a clickable link in the shell log ---
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
-        f"<b>User:</b> {user.full_name} [<code>{user.id}</code>]\n"
+        f"<b>User:</b> <a href=\"tg://user?id={user.id}\">{user.full_name}</a> [<code>{user.id}</code>]\n"
     )
     if chat.type != 'private':
          log_template_to_owner += f"<b>Chat:</b> {chat.title} [<code>{chat.id}</code>]\n"
@@ -122,11 +124,11 @@ async def run_shell_in_background(
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.message_id}.txt"
-        caption_template = f"<b>Shell:</b>\n<code>~$ {command_to_run}</code>\n\n<i>Output was too long, sent as a file.</i>"
+        caption_template = f"Shell:\n<code>~$ {command_to_run}</code>\n\n<i>Output was too long, sent as a file.</i>"
         clean_caption, entities = build_text_with_entities(caption_template)
         await update.message.reply_document(document=output_file, caption=clean_caption, caption_entities=entities)
     else:
-        reply_template = f"<b>Shell:</b>\n<pre>~$ {command_to_run}\n\n{output}</pre>"
+        reply_template = f"Shell:\n<pre>~$ {command_to_run}\n\n{output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
 
@@ -187,14 +189,13 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         
-        # --- FIX: Fetch target user's name for the reply message ---
-        target_name = f"User {target_id}" # Default name
+        target_name = f"User {target_id}"
         try:
             target_user = await context.bot.get_chat(chat_id=target_id)
             target_name = f"<a href=\"tg://user?id={target_id}\">{target_user.first_name}</a>"
         except BadRequest:
             logger.warning(f"Could not fetch info for user ID {target_id}. They might not have started the bot.")
-            target_name = f"User [<code>{target_id}</code>]" # Fallback for your parser
+            target_name = f"User [<code>{target_id}</code>]"
 
         if db.add_sudo(target_id):
             reply_template = f"Success: {target_name} has been added to sudoers."
@@ -217,8 +218,7 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         
-        # --- FIX: Fetch target user's name for the reply message ---
-        target_name = f"User {target_id}" # Default name
+        target_name = f"User {target_id}"
         try:
             target_user = await context.bot.get_chat(chat_id=target_id)
             target_name = f"<a href=\"tg://user?id={target_id}\">{target_user.first_name}</a>"
