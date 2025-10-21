@@ -68,15 +68,14 @@ async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_T
 
     except asyncio.TimeoutError:
         output = f"Error: Command timed out after {COMMAND_TIMEOUT} seconds."
-        if process: process.kill()
     except asyncio.CancelledError:
         log_status_text = "Cancelled by user"
-        # The process is already killed by stoptasks_command, this just handles the cleanup
         raise
     except Exception as e:
         output = f"An unexpected error occurred: {e}"
-        if process: process.kill()
     finally:
+        if process and process.returncode is None:
+            process.kill()
         if 'running_process' in context.user_data:
             del context.user_data['running_process']
         return_code = process.returncode if process else -1
@@ -86,7 +85,7 @@ async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_T
 # --- MAIN COMMAND HANDLERS ---
 async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
-        logger.warning(f"Unauthorized command attempt by {update.effective_user.name} [{update.effective_user.id}]")
+        logger.warning(f"Unauthorized shell attempt by {update.effective_user.name} [{update.effective_user.id}]")
         return
 
     if context.user_data.get('running_task'):
@@ -110,11 +109,9 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task = asyncio.create_task(run_shell_process(command_to_run, context))
         context.user_data['running_task'] = task
         output, return_code, log_status_text = await task
-
     except asyncio.CancelledError:
         output = "Task was cancelled by user."
         log_status_text = "Cancelled by user"
-    
     finally:
         if 'running_task' in context.user_data:
             del context.user_data['running_task']
@@ -169,37 +166,18 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Unauthorized /stoptasks attempt by {user.name} [{user.id}]")
         return
 
-    # --- FIX: More robustly kill the process and then cancel the task ---
-    process = context.user_data.get('running_process')
     task: Task = context.user_data.get('running_task')
-
-    if not process and (not task or task.done()):
+    if not task or task.done():
         await update.message.reply_text("There are no active tasks to stop.")
         return
 
-    stopped = False
-    # Step 1: Directly and forcefully kill the OS process.
-    if process:
-        try:
-            process.kill()
-            stopped = True
-            logger.info(f"User {user.name} [{user.id}] killed a running process.")
-        except ProcessLookupError:
-            # Process already finished, which is fine.
-            pass
-        except Exception as e:
-            logger.error(f"Error while trying to kill process: {e}")
-
-    # Step 2: Cleanly cancel the asyncio task to break the await loop.
-    if task and not task.done():
+    try:
         task.cancel()
-        stopped = True
-
-    if stopped:
-        await update.message.reply_text("<b>Stopping active task...</b>")
-    else:
-        await update.message.reply_text("Could not find an active task to stop.")
-
+        logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
+        await update.message.reply_text("<b>Stopping active task...</b>", parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Error while trying to cancel a task: {e}")
+        await update.message.reply_text(f"An error occurred: {e}")
 
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
@@ -273,7 +251,11 @@ def main():
     if not TELEGRAM_BOT_TOKEN or not OWNER_ID:
         raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_ID must be set in the .env file.")
     db.init_db()
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # --- THE DEFINITIVE FIX FOR STOPTASKS ---
+    # This enables true concurrency, allowing stoptasks to interrupt shell.
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
+    
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
     application.add_handler(CommandHandler("addsudo", addsudo_command))
