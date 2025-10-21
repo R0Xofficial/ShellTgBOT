@@ -47,3 +47,14 @@ def is_sudo(user_id: int) -> bool:
     result = cursor.fetchone()
     conn.close()
     return result is not None
+
+def get_all_sudos() -> list[int]:
+    """Retrieves a list of all sudo user IDs from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM sudo_users ORDER BY user_id')
+    # The result of fetchall is a list of tuples, e.g., [(123,), (456,)]
+    # We convert it to a simple list of integers.
+    user_ids = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return user_ids
