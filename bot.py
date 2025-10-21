@@ -288,7 +288,7 @@ def main():
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     
-    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.COMMAND, ignore_edited_commands), group=1)
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.COMMAND, ignore_edited_commands), group=-1)
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
