@@ -218,7 +218,7 @@ async def stopalltasks_command(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"Unauthorized /stopalltasks attempt by {update.effective_user.name} [{update.effective_user.id}]")
         return
 
-    active_tasks = context.bot_data.get('running_tasks', {})
+    active_tasks = context.bot_data.get('running_process', {})
     if not active_tasks:
         await update.message.reply_text("There are no active tasks to stop.")
         return
