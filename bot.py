@@ -316,7 +316,7 @@ def main():
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
     application.add_handler(CommandHandler("stoptasks", stoptasks_command))
-    application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
+    # application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
     
     logger.info("Bot is starting...")
     application.run_polling()
