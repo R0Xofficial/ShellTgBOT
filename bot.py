@@ -12,7 +12,8 @@ from TGentities import build_text_with_entities
 
 from telegram import Update, Bot
 from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes
+# --- FIX: Added MessageHandler and filters for handling edits ---
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Load environment variables from .env file
 load_dotenv()
@@ -139,19 +140,39 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.id}.txt"
-        caption_template = f"<pre>~$ {command_to_run}\n\nOutput too long, sent as file.</pre>"
+        caption_template = f"<pre>~$ {command_to_run}\n\n<i>Output too long, sent as file.</pre>"
         clean_caption, entities = build_text_with_entities(caption_template)
-        await context.bot.send_document(
-            chat_id=chat.id, document=output_file, caption=clean_caption, caption_entities=entities,
-            reply_to_message_id=update.effective_message.id
-        )
+        try:
+            await context.bot.send_document(
+                chat_id=chat.id, document=output_file, caption=clean_caption, caption_entities=entities,
+                reply_to_message_id=update.effective_message.id
+            )
+        except BadRequest as e:
+            if "replied message not found" in str(e).lower():
+                await context.bot.send_document(
+                    chat_id=chat.id, document=output_file, caption=clean_caption, caption_entities=entities
+                )
+            else: raise e
     else:
         reply_template = f"<pre>{final_output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
-        await context.bot.send_message(
-            chat_id=chat.id, text=clean_text, entities=entities,
-            reply_to_message_id=update.effective_message.id
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat.id, text=clean_text, entities=entities,
+                reply_to_message_id=update.effective_message.id
+            )
+        except BadRequest as e:
+            if "replied message not found" in str(e).lower():
+                await context.bot.send_message(
+                    chat_id=chat.id, text=clean_text, entities=entities
+                )
+            else: raise e
+
+# --- FIX: New handler to silently ignore all edited messages ---
+async def handle_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Catches all edited messages and does nothing, preventing errors."""
+    logger.info(f"Ignored an edited message from user {update.effective_user.id}")
+    return
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -252,16 +273,20 @@ def main():
         raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_ID must be set in the .env file.")
     db.init_db()
     
-    # --- THE DEFINITIVE FIX FOR STOPTASKS ---
-    # This enables true concurrency, allowing stoptasks to interrupt shell.
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     
+    # --- FIX: Add the edit handler first to catch all edits ---
+    # The group=1 ensures it runs before other handlers in the same group.
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edits), group=1)
+    
+    # Command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
     application.add_handler(CommandHandler("addsudo", addsudo_command))
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
     application.add_handler(CommandHandler("stoptasks", stoptasks_command))
+    
     logger.info("Bot is starting...")
     application.run_polling()
 
