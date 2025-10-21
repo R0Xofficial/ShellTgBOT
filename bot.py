@@ -186,10 +186,10 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.add_sudo(target_id):
-            reply_template = f"Success: User [<code>{target_id}</code>] has been added to sudoers."
+            reply_template = f"Success: {user.mention} [<code>{target_id}</code>] has been added to sudoers."
             logger.info(f"Owner {user.id} added {target_id} to sudo list.")
         else:
-            reply_template = f"Info: User [<code>{target_id}</code>] is already a sudoer."
+            reply_template = f"Info: {user.mention} [<code>{target_id}</code>] is already a sudoer."
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
     except (IndexError, ValueError):
@@ -205,10 +205,10 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.del_sudo(target_id):
-            reply_template = f"Success: User [<code>{target_id}</code>] has been removed from sudoers."
+            reply_template = f"Success: {user.mention} [<code>{target_id}</code>] has been removed from sudoers."
             logger.info(f"Owner {user.id} removed {target_id} from sudo list.")
         else:
-            reply_template = f"Info: User [<code>{target_id}</code>] was not found in sudoers."
+            reply_template = f"Info: {user.mention} [<code>{target_id}</code>] was not found in sudoers."
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
     except (IndexError, ValueError):
