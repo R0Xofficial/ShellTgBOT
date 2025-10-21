@@ -88,24 +88,22 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Executing command: '{command_to_run}' for user {user.name} [{user.id}]")
     
+    # --- FIX 1: Redirect stderr to stdout at the shell level ---
+    # This makes the output exactly like a real terminal.
+    command_with_redirect = f"{command_to_run} 2>&1"
+
     try:
         process = await asyncio.create_subprocess_shell(
-            command_to_run,
+            command_with_redirect,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE # Still capture stderr just in case, though it should be empty
         )
         
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=COMMAND_TIMEOUT)
+        stdout_bytes, _ = await asyncio.wait_for(process.communicate(), timeout=COMMAND_TIMEOUT)
 
-        stdout = stdout_bytes.decode('utf-8', errors='replace')
-        stderr = stderr_bytes.decode('utf-8', errors='replace')
+        output = stdout_bytes.decode('utf-8', errors='replace').strip()
         
-        output = ""
-        if stdout:
-            output += stdout
-        if stderr:
-            output += f"\n--- STDERR ---\n{stderr}"
-        if not output.strip():
+        if not output:
             output = "Command executed with no output."
 
     except asyncio.TimeoutError:
@@ -116,7 +114,9 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await feedback_message.delete()
 
-    log_status_text = "Executed successfully" if not stderr else "Executed with errors"
+    # --- FIX 2: Use the process return code to check for errors, not the stderr content ---
+    # A return code of 0 means success. Any other value is an error.
+    log_status_text = "Executed successfully" if process.returncode == 0 else "Executed with errors"
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
         f"<b>User:</b> {user.full_name} [<code>{user.id}</code>]\n"
@@ -127,11 +127,11 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_template_to_owner += (
         f"<b>Command:</b> <code>{command_to_run}</code>\n"
         f"<b>Time:</b> <code>{timestamp}</code>\n\n"
-        f"<b>Status: {log_status_text}.</b>"
+        f"<b>Status: {log_status_text}.</b> (Return Code: <code>{process.returncode}</code>)"
     )
 
     if not is_owner(user.id) or len(output) > 1000:
-        log_file_content = f"Command: {command_to_run}\n\n--- OUTPUT ---\n{output}"
+        log_file_content = f"Command: {command_to_run}\nReturn Code: {process.returncode}\n\n--- OUTPUT ---\n{output}"
         output_file = BytesIO(log_file_content.encode('utf-8'))
         output_file.name = f"Shell_{update.effective_message.message_id}.txt"
         clean_caption, caption_entities = build_text_with_entities(log_template_to_owner)
@@ -146,7 +146,10 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.message_id}.txt"
-        await update.message.reply_document(document=output_file, caption=f"Shell:\n<code>~$ {command_to_run}</code>")
+        # Since the output is a file, we can format the caption nicely.
+        caption_template = f"Shell:\n<code>~$ {command_to_run}</code>\n\n<i>Output was too long, sent as a file.</i>"
+        clean_caption, entities = build_text_with_entities(caption_template)
+        await update.message.reply_document(document=output_file, caption=clean_caption, caption_entities=entities)
     else:
         reply_template = f"Shell:\n<pre>~$ {command_to_run}\n\n{output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
@@ -215,8 +218,6 @@ async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clean_text, entities = build_text_with_entities(reply_template)
     await update.message.reply_text(text=clean_text, entities=entities)
 
-
-# --- FIX: Added the missing colon here ---
 def main():
     """Start the bot."""
     if not TELEGRAM_BOT_TOKEN or not OWNER_ID:
