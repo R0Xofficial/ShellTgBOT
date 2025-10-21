@@ -26,7 +26,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-# --- FIX: Silence noisy library loggers for a cleaner console ---
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
@@ -66,7 +65,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command_to_run = " ".join(context.args)
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
 
-    # --- Authorization Check ---
     if not is_authorized(user.id):
         logger.warning(f"Unauthorized command attempt: User: {user.name} [{user.id}], Command: '{command_to_run}'")
         log_template = (
@@ -202,7 +200,6 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_owner(user.id):
-        # --- FIX: This line was causing the SyntaxError ---
         logger.warning(f"Unauthorized /sudos attempt by {user.name} [{user.id}]")
         return
     
@@ -219,4 +216,23 @@ async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text=clean_text, entities=entities)
 
 
-def main()
+# --- FIX: Added the missing colon here ---
+def main():
+    """Start the bot."""
+    if not TELEGRAM_BOT_TOKEN or not OWNER_ID:
+        raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_ID must be set in the .env file.")
+
+    db.init_db()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler(["shell", "sh"], shell_command))
+    application.add_handler(CommandHandler("addsudo", addsudo_command))
+    application.add_handler(CommandHandler("delsudo", delsudo_command))
+    application.add_handler(CommandHandler("sudos", sudos_command))
+
+    logger.info("Bot is starting...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
