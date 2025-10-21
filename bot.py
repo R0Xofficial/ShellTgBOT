@@ -134,19 +134,19 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not output.strip():
         output = "Command executed with no output."
         
-    final_output = f"~$ {command_to_run}\n{output}"
+    final_output = f"~$ {command_to_run}\n\n{output}"
 
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.id}.txt"
-        caption_template = f"<b>Shell:</b>\n<code>~$ {command_to_run}</code>\n\n<i>Output too long, sent as file.</i>"
+        caption_template = f"<pre>~$ {command_to_run}\n\nOutput too long, sent as file.</pre>"
         clean_caption, entities = build_text_with_entities(caption_template)
         await context.bot.send_document(
             chat_id=chat.id, document=output_file, caption=clean_caption, caption_entities=entities,
             reply_to_message_id=update.effective_message.id
         )
     else:
-        reply_template = f"<b>Shell:</b>\n<pre>{final_output}</pre>"
+        reply_template = f"<pre>{final_output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
         await context.bot.send_message(
             chat_id=chat.id, text=clean_text, entities=entities,
