@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone # <-- FIX 1: Import timezone
 from dotenv import load_dotenv
 from io import BytesIO
 import database as db
@@ -19,7 +19,7 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 TELEGRAM_MESSAGE_LIMIT = 4096
-COMMAND_TIMEOUT = 3600 # Increased timeout to 1 hour, cancellation is the preferred way to stop
+COMMAND_TIMEOUT = 3600
 
 # --- LOGGING SETUP ---
 logging.basicConfig(
@@ -61,7 +61,8 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
     command_to_run = " ".join(context.args)
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    # --- FIX 2: Replace deprecated utcnow() with the new, timezone-aware method ---
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     if not is_authorized(user.id):
         # Unauthorized logic remains the same
@@ -84,7 +85,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command_with_redirect = f"{command_to_run} 2>&1"
     process = None
     output = ""
-    log_status_text = "Executed with errors" # Default status
+    log_status_text = "Executed with errors"
 
     try:
         process = await asyncio.create_subprocess_shell(
@@ -102,16 +103,14 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except asyncio.TimeoutError:
         output = f"Error: Command timed out after {COMMAND_TIMEOUT} seconds."
     except asyncio.CancelledError:
-        # This block is entered if process.communicate() is cancelled, which happens when the process is killed
         output = "Task was cancelled by user."
         log_status_text = "Cancelled by user"
     except Exception as e:
         output = f"An error occurred while executing the command: {e}"
     finally:
-        # This block ensures that we clean up, no matter how the try block exited
         if 'running_process' in context.user_data:
             del context.user_data['running_process']
-        if process and process.returncode is None: # If process still running after an error
+        if process and process.returncode is None:
             process.kill()
         if not output.strip():
             output = "Command executed with no output."
@@ -132,7 +131,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Status: {log_status_text}.</b> {return_code_info}"
     )
 
-    # Logging and user reply logic remains similar
     if not is_owner(user.id) or len(output) > 1000:
         log_file_content = f"Command: {command_to_run}\nReturn Code: {process.returncode if process else 'N/A'}\n\n--- OUTPUT ---\n{output}"
         output_file = BytesIO(log_file_content.encode('utf-8'))
@@ -157,9 +155,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
 
-# --- NEW COMMAND ---
 async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /stoptasks. Cancels the running shell command for the user."""
     user = update.effective_user
     if not is_authorized(user.id):
         logger.warning(f"Unauthorized /stoptasks attempt by {user.name} [{user.id}]")
@@ -173,19 +169,16 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         process.kill()
-        # The 'finally' block in shell_command will handle cleanup of user_data
         logger.info(f"User {user.name} [{user.id}] cancelled a running process.")
         await update.message.reply_text("<b>All active tasks for you have been stopped.</b>", parse_mode='HTML')
     except ProcessLookupError:
-        # This can happen if the process finished between the check and the kill() call
         await update.message.reply_text("The task finished just before it could be stopped.")
     except Exception as e:
         logger.error(f"Error while trying to kill a process: {e}")
         await update.message.reply_text(f"An error occurred while trying to stop the task: {e}")
 
-
+# Pozostałe funkcje (addsudo, delsudo, sudos) pozostają bez zmian
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function remains unchanged
     user = update.effective_user
     if not is_owner(user.id):
         logger.warning(f"Unauthorized /addsudo attempt by {user.name} [{user.id}]")
@@ -205,7 +198,6 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"An error occurred: {e}")
 
 async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function remains unchanged
     user = update.effective_user
     if not is_owner(user.id):
         logger.warning(f"Unauthorized /delsudo attempt by {user.name} [{user.id}]")
@@ -225,7 +217,6 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"An error occurred: {e}")
 
 async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function remains unchanged
     user = update.effective_user
     if not is_owner(user.id):
         logger.warning(f"Unauthorized /sudos attempt by {user.name} [{user.id}]")
@@ -253,7 +244,6 @@ def main():
     application.add_handler(CommandHandler("addsudo", addsudo_command))
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
-    # --- REGISTER THE NEW COMMAND ---
     application.add_handler(CommandHandler("stoptasks", stoptasks_command))
 
     logger.info("Bot is starting...")
