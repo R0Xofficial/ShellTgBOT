@@ -45,12 +45,8 @@ async def log_to_owner(bot: Bot, message_template: str):
     except Exception as e:
         logger.error(f"Failed to send log message to owner: {e}")
 
-# --- ARCHITECTURE FIX: Background task ONLY runs the command and returns results ---
+# --- BACKGROUND TASK LOGIC ---
 async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_TYPE) -> tuple:
-    """
-    Executes the shell command and returns the output, return code, and status.
-    This function is designed to be cancelled safely. It does NOT send messages.
-    """
     command_with_redirect = f"{command_to_run} 2>&1"
     process = None
     output = ""
@@ -74,10 +70,8 @@ async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_T
         output = f"Error: Command timed out after {COMMAND_TIMEOUT} seconds."
         if process: process.kill()
     except asyncio.CancelledError:
-        # This is expected when stoptasks is called. The main handler will format the message.
         log_status_text = "Cancelled by user"
-        if process: process.kill()
-        # Re-raise the exception so the main handler knows it was cancelled
+        # The process is already killed by stoptasks_command, this just handles the cleanup
         raise
     except Exception as e:
         output = f"An unexpected error occurred: {e}"
@@ -126,13 +120,10 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del context.user_data['running_task']
         await feedback_message.delete()
 
-    # --- Message sending logic is now in a safe, non-cancellable context ---
-    
     user = update.effective_user
     chat = update.effective_chat
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
-    # Log to owner
     return_code_info = f"(Return Code: <code>{return_code}</code>)"
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
@@ -143,7 +134,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await log_to_owner(context.bot, log_template_to_owner)
 
-    # Reply to user
     if not output.strip():
         output = "Command executed with no output."
         
@@ -179,18 +169,37 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Unauthorized /stoptasks attempt by {user.name} [{user.id}]")
         return
 
+    # --- FIX: More robustly kill the process and then cancel the task ---
+    process = context.user_data.get('running_process')
     task: Task = context.user_data.get('running_task')
-    if not task or task.done():
+
+    if not process and (not task or task.done()):
         await update.message.reply_text("There are no active tasks to stop.")
         return
 
-    try:
+    stopped = False
+    # Step 1: Directly and forcefully kill the OS process.
+    if process:
+        try:
+            process.kill()
+            stopped = True
+            logger.info(f"User {user.name} [{user.id}] killed a running process.")
+        except ProcessLookupError:
+            # Process already finished, which is fine.
+            pass
+        except Exception as e:
+            logger.error(f"Error while trying to kill process: {e}")
+
+    # Step 2: Cleanly cancel the asyncio task to break the await loop.
+    if task and not task.done():
         task.cancel()
-        logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
-        await update.message.reply_text("<b>Stopping active task...</b>", parse_mode='HTML')
-    except Exception as e:
-        logger.error(f"Error while trying to cancel a task: {e}")
-        await update.message.reply_text(f"An error occurred: {e}")
+        stopped = True
+
+    if stopped:
+        await update.message.reply_text("<b>Stopping active task...</b>")
+    else:
+        await update.message.reply_text("Could not find an active task to stop.")
+
 
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
