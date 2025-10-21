@@ -213,7 +213,10 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
 
-async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE): 
+    if update.effective_user.id == context.bot.id:
+        await update.message.reply_text("Bot is already sudo.")
+        return
     if not is_owner(update.effective_user.id):
         logger.warning(f"Unauthorized /addsudo attempt by {update.effective_user.name} [{update.effective_user.id}]")
         return
@@ -241,6 +244,9 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"An error occurred: {e}")
 
 async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == context.bot.id:
+        await update.message.reply_text("Bot cannot be unsudo.")
+        return
     if not is_owner(update.effective_user.id):
         logger.warning(f"Unauthorized /delsudo attempt by {update.effective_user.name} [{update.effective_user.id}]")
         return
