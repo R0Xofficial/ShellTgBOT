@@ -45,6 +45,10 @@ async def log_to_owner(bot: Bot, message_template: str):
     except Exception as e:
         logger.error(f"Failed to send log message to owner: {e}")
 
+async def ignore_edited_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(f"Ignoring edited command: {update.edited_message.text}")
+    raise ApplicationHandlerStop
+
 # --- BACKGROUND TASK LOGIC ---
 async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_TYPE) -> tuple:
     command_with_redirect = f"{command_to_run} 2>&1"
@@ -183,10 +187,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else: raise e
 
-async def handle_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Ignored an edited message from user {update.effective_user.id}")
-    return
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if is_authorized(user_id):
@@ -288,7 +288,7 @@ def main():
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     
-    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edits), group=1)
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.COMMAND, ignore_edited_commands), group=1)
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
