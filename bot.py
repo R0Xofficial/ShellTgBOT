@@ -151,7 +151,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_caption, entities = build_text_with_entities(caption_template)
         await update.message.reply_document(document=output_file, caption=clean_caption, caption_entities=entities)
     else:
-        reply_template = f"Shell:\n<pre>~$ {command_to_run}\n\n{output}</pre>"
+        reply_template = f"<b>Shell:</b>\n<pre>~$ {command_to_run}\n\n{output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
 
