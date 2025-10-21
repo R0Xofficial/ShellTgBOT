@@ -121,17 +121,26 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
+    # --- FIX: Enhanced chat info with a clickable message link ---
+    chat_info_line = ""
+    if chat.type != 'private':
+        if chat.username:
+            # Public group/channel with a username
+            message_link = f"https://t.me/{chat.username}/{update.effective_message.id}"
+            chat_info_line = f"<b>Initiated in:</b> <a href=\"{message_link}\">{chat.title}</a> [<code>{chat.id}</code>]\n"
+        else:
+            # Private supergroup (ID starts with -100)
+            stripped_chat_id = str(chat.id).replace("-100", "")
+            message_link = f"https://t.me/c/{stripped_chat_id}/{update.effective_message.id}"
+            chat_info_line = f"<b>Initiated in:</b> <a href=\"{message_link}\">{chat.title}</a> [<code>{chat.id}</code>]\n"
+    else:
+        chat_info_line = "<b>Initiated in:</b> PM\n"
+
     return_code_info = f"(Return Code: <code>{return_code}</code>)"
-    
-    # --- FIX: Re-added the conditional chat info to the log message ---
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
         f"<b>User:</b> <a href=\"tg://user?id={user.id}\">{user.full_name}</a> [<code>{user.id}</code>]\n"
-    )
-    if chat.type != 'private':
-        log_template_to_owner += f"<b>Chat:</b> {chat.title} [<code>{chat.id}</code>]\n"
-    
-    log_template_to_owner += (
+        f"{chat_info_line}"
         f"<b>Command:</b> <code>{command_to_run}</code>\n"
         f"<b>Time:</b> <code>{timestamp}</code>\n\n"
         f"<b>Status: {log_status_text}.</b> {return_code_info}"
@@ -146,7 +155,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.id}.txt"
-        caption_template = f"<pre>~$ {command_to_run}\n\n<i>Output too long, sent as file.</pre>"
+        caption_template = f"<pre>~$ {command_to_run}\n\nOutput too long, sent as file.</pre>"
         clean_caption, entities = build_text_with_entities(caption_template)
         try:
             await context.bot.send_document(
@@ -175,7 +184,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else: raise e
 
 async def handle_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Catches all edited messages and does nothing, preventing errors."""
     logger.info(f"Ignored an edited message from user {update.effective_user.id}")
     return
 
@@ -200,7 +208,7 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         task.cancel()
         logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
-        await update.message.reply_text("<b>Stopping active task...</b>")
+        await update.message.reply_text("<b>Stopping active task...</b>", parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
@@ -220,10 +228,10 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_name = f"User [<code>{target_id}</code>]"
 
         if db.add_sudo(target_id):
-            reply_template = f"Success: {target_name} has been added to sudoers."
+            reply_template = f"<b>Success:</b> {target_name} has been added to sudoers."
             logger.info(f"Owner {update.effective_user.id} added {target_id} to sudo list.")
         else:
-            reply_template = f"Info: {target_name} is already a sudoer."
+            reply_template = f"<b>Info:</b> {target_name} is already a sudoer."
         
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
@@ -247,10 +255,10 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_name = f"User [<code>{target_id}</code>]"
         
         if db.del_sudo(target_id):
-            reply_template = f"Success: {target_name} has been removed from sudoers."
+            reply_template = f"<b>Success:</b> {target_name} has been removed from sudoers."
             logger.info(f"Owner {update.effective_user.id} removed {target_id} from sudo list.")
         else:
-            reply_template = f"Info: {target_name} was not found in sudoers."
+            reply_template = f"<b>Info:</b> {target_name} was not found in sudoers."
         
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
