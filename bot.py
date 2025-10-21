@@ -1,10 +1,11 @@
 import os
 import logging
 import asyncio
-from datetime import datetime, timezone # <-- FIX 1: Import timezone
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from io import BytesIO
 import database as db
+from asyncio import Task
 
 # Import your custom entities builder
 from TGentities import build_text_with_entities
@@ -33,54 +34,27 @@ logger = logging.getLogger(__name__)
 
 # --- AUTHORIZATION CHECKS ---
 def is_owner(user_id: int) -> bool:
-    """Check if the user is the owner."""
     return user_id == OWNER_ID
 
 def is_authorized(user_id: int) -> bool:
-    """Check if the user is the owner or a sudo user."""
     return is_owner(user_id) or db.is_sudo(user_id)
 
 # --- HELPER FUNCTIONS ---
 async def log_to_owner(bot: Bot, message_template: str):
-    """Sends a formatted log message to the bot owner using the custom entities builder."""
     try:
         clean_text, entities = build_text_with_entities(message_template)
         await bot.send_message(chat_id=OWNER_ID, text=clean_text, entities=entities)
     except Exception as e:
         logger.error(f"Failed to send log message to owner: {e}")
 
-# --- COMMAND HANDLERS ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if is_authorized(user_id):
-        await update.message.reply_text("Welcome, authorized user. Use /shell or /sh to execute commands.")
-    else:
-        logger.warning(f"Unauthorized /start attempt by {update.effective_user.name} [{user_id}]")
-
-async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- BACKGROUND TASK LOGIC ---
+async def run_shell_in_background(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, command_to_run: str, feedback_message
+):
+    """This function runs the shell command in the background, allowing the bot to remain responsive."""
     user = update.effective_user
     chat = update.effective_chat
-    command_to_run = " ".join(context.args)
-    # --- FIX 2: Replace deprecated utcnow() with the new, timezone-aware method ---
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-
-    if not is_authorized(user.id):
-        # Unauthorized logic remains the same
-        return
-
-    if context.user_data.get('running_process'):
-        await update.message.reply_text("A shell command is already running. Please wait for it to finish or use /stoptasks to cancel it.")
-        return
-
-    if not command_to_run:
-        await update.message.reply_text("Usage: /shell <command>")
-        return
-
-    executing_template = "<code>Executing...</code>"
-    clean_text, entities = build_text_with_entities(executing_template)
-    feedback_message = await update.message.reply_text(text=clean_text, entities=entities)
-
-    logger.info(f"Executing command: '{command_to_run}' for user {user.name} [{user.id}]")
     
     command_with_redirect = f"{command_to_run} 2>&1"
     process = None
@@ -105,19 +79,23 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except asyncio.CancelledError:
         output = "Task was cancelled by user."
         log_status_text = "Cancelled by user"
+        if process and process.returncode is None:
+            process.kill()
     except Exception as e:
         output = f"An error occurred while executing the command: {e}"
     finally:
+        if 'running_task' in context.user_data:
+            del context.user_data['running_task']
         if 'running_process' in context.user_data:
             del context.user_data['running_process']
-        if process and process.returncode is None:
-            process.kill()
         if not output.strip():
             output = "Command executed with no output."
 
     await feedback_message.delete()
 
     return_code_info = f"(Return Code: <code>{process.returncode if process else 'N/A'}</code>)"
+    
+    # --- FIX: Using user.full_name for detailed shell command logs ---
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
         f"<b>User:</b> {user.full_name} [<code>{user.id}</code>]\n"
@@ -147,37 +125,67 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.message_id}.txt"
-        caption_template = f"<b>Shell:</b>\n<code>~$ {command_to_run}</code>\n\n<i>Output was too long, sent as a file.</i>"
+        caption_template = f"Shell:\n<code>~$ {command_to_run}</code>\n\n<i>Output was too long, sent as a file.</i>"
         clean_caption, entities = build_text_with_entities(caption_template)
         await update.message.reply_document(document=output_file, caption=clean_caption, caption_entities=entities)
     else:
-        reply_template = f"<b>Shell:</b>\n<pre>~$ {command_to_run}\n\n{output}</pre>"
+        reply_template = f"Shell:\n<pre>~$ {command_to_run}\n\n{output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
 
+# --- COMMAND HANDLERS ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if is_authorized(user_id):
+        await update.message.reply_text("Welcome, authorized user. Use /shell or /sh to execute commands.")
+    else:
+        logger.warning(f"Unauthorized /start attempt by {update.effective_user.name} [{user_id}]")
+
+async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Launches the shell command as a non-blocking background task."""
+    if not is_authorized(update.effective_user.id):
+        logger.warning(f"Unauthorized command attempt: User: {update.effective_user.name} [{update.effective_user.id}], Command: '{update.message.text}'")
+        return
+
+    if context.user_data.get('running_task'):
+        await update.message.reply_text("A shell command is already running. Please wait for it to finish or use /stoptasks to cancel it.")
+        return
+
+    command_to_run = " ".join(context.args)
+    if not command_to_run:
+        await update.message.reply_text("Usage: /shell <command>")
+        return
+
+    executing_template = "<code>Executing...</code>"
+    clean_text, entities = build_text_with_entities(executing_template)
+    feedback_message = await update.message.reply_text(text=clean_text, entities=entities)
+
+    task = asyncio.create_task(
+        run_shell_in_background(update, context, command_to_run, feedback_message)
+    )
+    context.user_data['running_task'] = task
+
 async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancels the running background task for the user."""
     user = update.effective_user
     if not is_authorized(user.id):
         logger.warning(f"Unauthorized /stoptasks attempt by {user.name} [{user.id}]")
         return
 
-    process = context.user_data.get('running_process')
+    task: Task = context.user_data.get('running_task')
 
-    if not process:
+    if not task or task.done():
         await update.message.reply_text("There are no active tasks to stop.")
         return
 
     try:
-        process.kill()
-        logger.info(f"User {user.full_name} [{user.id}] cancelled a running process.")
-        await update.message.reply_text("<b>All active tasks for you have been stopped.</b>", parse_mode='HTML')
-    except ProcessLookupError:
-        await update.message.reply_text("The task finished just before it could be stopped.")
+        task.cancel()
+        logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
+        await update.message.reply_text("<b>Attempting to stop all active tasks...</b>", parse_mode='HTML')
     except Exception as e:
-        logger.error(f"Error while trying to kill a process: {e}")
+        logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred while trying to stop the task: {e}")
 
-# Pozostałe funkcje (addsudo, delsudo, sudos) pozostają bez zmian
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_owner(user.id):
@@ -186,12 +194,23 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.add_sudo(target_id):
-            reply_template = f"Success: {user.full_name} [<code>{target_id}</code>] has been added to sudoers."
+            reply_template = f"Success: User [<code>{target_id}</code>] has been added to sudoers."
             logger.info(f"Owner {user.id} added {target_id} to sudo list.")
+            
+            # --- FIX: Using user.first_name ONLY for this specific admin log ---
+            log_to_owner_template = (
+                f"ℹ️ <b>Sudo Management</b>\n\n"
+                f"<b>Admin:</b> {user.first_name} [<code>{user.id}</code>]\n"
+                f"<b>Action:</b> Added Sudo\n"
+                f"<b>Target:</b> <a href=\"tg://user?id={target_id}\">{target_id}</a>"
+            )
+            await log_to_owner(context.bot, log_to_owner_template)
         else:
-            reply_template = f"Info: {user.full_name} [<code>{target_id}</code>] is already a sudoer."
+            reply_template = f"Info: User [<code>{target_id}</code>] is already a sudoer."
+        
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
+
     except (IndexError, ValueError):
         await update.message.reply_text("Usage: /addsudo <user_id>")
     except Exception as e:
@@ -205,10 +224,20 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.del_sudo(target_id):
-            reply_template = f"Success: {user.full_name} [<code>{target_id}</code>] has been removed from sudoers."
+            reply_template = f"Success: User [<code>{target_id}</code>] has been removed from sudoers."
             logger.info(f"Owner {user.id} removed {target_id} from sudo list.")
+
+            # --- FIX: Using user.first_name ONLY for this specific admin log ---
+            log_to_owner_template = (
+                f"ℹ️ <b>Sudo Management</b>\n\n"
+                f"<b>Admin:</b> {user.first_name} [<code>{user.id}</code>]\n"
+                f"<b>Action:</b> Removed Sudo\n"
+                f"<b>Target:</b> <a href=\"tg://user?id={target_id}\">{target_id}</a>"
+            )
+            await log_to_owner(context.bot, log_to_owner_template)
         else:
-            reply_template = f"Info: {user.full_name} [<code>{target_id}</code>] was not found in sudoers."
+            reply_template = f"Info: User [<code>{target_id}</code>] was not found in sudoers."
+
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
     except (IndexError, ValueError):
@@ -232,7 +261,6 @@ async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text=clean_text, entities=entities)
 
 def main():
-    """Start the bot."""
     if not TELEGRAM_BOT_TOKEN or not OWNER_ID:
         raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_ID must be set in the .env file.")
 
