@@ -159,7 +159,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
         output_file.name = f"Shell_output_{update.effective_message.id}.txt"
-        caption_template = f"<pre>~$ {command_to_run}\n\nOutput too long, sent as file.</pre>"
+        caption_template = f"<pre>Output too long, sent as file.</pre>"
         clean_caption, entities = build_text_with_entities(caption_template)
         try:
             await context.bot.send_document(
