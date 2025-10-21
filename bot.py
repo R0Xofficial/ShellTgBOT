@@ -26,6 +26,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+# --- FIX: Silence noisy library loggers for a cleaner console ---
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # --- AUTHORIZATION CHECKS ---
@@ -80,7 +84,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /shell <command>")
         return
 
-    # --- Send feedback message and store it to delete later ---
     executing_template = "<code>Executing...</code>"
     clean_text, entities = build_text_with_entities(executing_template)
     feedback_message = await update.message.reply_text(text=clean_text, entities=entities)
@@ -88,7 +91,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Executing command: '{command_to_run}' for user {user.name} [{user.id}]")
     
     try:
-        # --- Asynchronously execute the shell command ---
         process = await asyncio.create_subprocess_shell(
             command_to_run,
             stdout=asyncio.subprocess.PIPE,
@@ -114,10 +116,8 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         output = f"An error occurred while executing the command: {e}"
 
-    # --- Delete the "Executing..." message ---
     await feedback_message.delete()
 
-    # --- Log to Owner ---
     log_status_text = "Executed successfully" if not stderr else "Executed with errors"
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
@@ -143,7 +143,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await log_to_owner(context.bot, log_template_to_owner)
 
-    # --- Reply to User with the new format ---
     final_output = f"~$ {command_to_run}\n\n{output}"
 
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
@@ -157,7 +156,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /addsudo command. Only for owner."""
     user = update.effective_user
     if not is_owner(user.id):
         logger.warning(f"Unauthorized /addsudo attempt by {user.name} [{user.id}]")
@@ -180,7 +178,45 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"An error occurred: {e}")
 
 async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /delsudo command. Only for owner."""
     user = update.effective_user
     if not is_owner(user.id):
-        logger.warning(f"Un
+        logger.warning(f"Unauthorized /delsudo attempt by {user.name} [{user.id}]")
+        return
+
+    try:
+        target_id = int(context.args[0])
+        if db.del_sudo(target_id):
+            reply_template = f"Success: User [<code>{target_id}</code>] has been removed from sudoers."
+            logger.info(f"Owner {user.id} removed {target_id} from sudo list.")
+        else:
+            reply_template = f"Info: User [<code>{target_id}</code>] was not found in sudoers."
+
+        clean_text, entities = build_text_with_entities(reply_template)
+        await update.message.reply_text(text=clean_text, entities=entities)
+
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /delsudo <user_id>")
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+
+async def sudos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_owner(user.id):
+        # --- FIX: This line was causing the SyntaxError ---
+        logger.warning(f"Unauthorized /sudos attempt by {user.name} [{user.id}]")
+        return
+    
+    sudo_ids = db.get_all_sudos()
+    
+    if not sudo_ids:
+        reply_template = "There are no sudo users."
+    else:
+        reply_template = "<b>Sudo Users:</b>\n\n"
+        for user_id in sudo_ids:
+            reply_template += f"• <code>{user_id}</code>\n"
+            
+    clean_text, entities = build_text_with_entities(reply_template)
+    await update.message.reply_text(text=clean_text, entities=entities)
+
+
+def main()
