@@ -12,7 +12,6 @@ from TGentities import build_text_with_entities
 
 from telegram import Update, Bot
 from telegram.error import BadRequest
-# --- FIX: Added MessageHandler and filters for handling edits ---
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Load environment variables from .env file
@@ -123,9 +122,16 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     return_code_info = f"(Return Code: <code>{return_code}</code>)"
+    
+    # --- FIX: Re-added the conditional chat info to the log message ---
     log_template_to_owner = (
         f"🖥️ <b>Shell Command Executed</b>\n\n"
         f"<b>User:</b> <a href=\"tg://user?id={user.id}\">{user.full_name}</a> [<code>{user.id}</code>]\n"
+    )
+    if chat.type != 'private':
+        log_template_to_owner += f"<b>Chat:</b> {chat.title} [<code>{chat.id}</code>]\n"
+    
+    log_template_to_owner += (
         f"<b>Command:</b> <code>{command_to_run}</code>\n"
         f"<b>Time:</b> <code>{timestamp}</code>\n\n"
         f"<b>Status: {log_status_text}.</b> {return_code_info}"
@@ -168,7 +174,6 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else: raise e
 
-# --- FIX: New handler to silently ignore all edited messages ---
 async def handle_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Catches all edited messages and does nothing, preventing errors."""
     logger.info(f"Ignored an edited message from user {update.effective_user.id}")
@@ -195,7 +200,7 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         task.cancel()
         logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
-        await update.message.reply_text("<b>Stopping active task...</b>", parse_mode='HTML')
+        await update.message.reply_text("<b>Stopping active task...</b>")
     except Exception as e:
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
@@ -275,11 +280,8 @@ def main():
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     
-    # --- FIX: Add the edit handler first to catch all edits ---
-    # The group=1 ensures it runs before other handlers in the same group.
     application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edits), group=1)
     
-    # Command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
     application.add_handler(CommandHandler("addsudo", addsudo_command))
