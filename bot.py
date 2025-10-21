@@ -134,7 +134,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not output.strip():
         output = "Command executed with no output."
         
-    final_output = f"~$ {command_to_run}\n\n{output}"
+    final_output = f"~$ {command_to_run}\n{output}"
 
     if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
         output_file = BytesIO(final_output.encode('utf-8'))
