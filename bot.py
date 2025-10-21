@@ -46,7 +46,7 @@ async def log_to_owner(bot: Bot, message_template: str):
         logger.error(f"Failed to send log message to owner: {e}")
 
 async def ignore_edited_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.info(f"Ignoring edited command: {update.edited_message.text}")
+    logger.info(f"Ignoring edited command")
     raise ApplicationHandlerStop
 
 # --- BACKGROUND TASK LOGIC ---
