@@ -208,7 +208,7 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         task.cancel()
         logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
-        await update.message.reply_text(f"<b>Stopping active task...</b>", ParseMode='HTML')
+        await update.message.reply_text(f"<b>Stopping active task...</b>", parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
