@@ -12,7 +12,7 @@ from TGentities import build_text_with_entities
 
 from telegram import Update, Bot
 from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ApplicationHandlerStop
 
 # Load environment variables from .env file
 load_dotenv()
@@ -208,7 +208,7 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         task.cancel()
         logger.info(f"User {user.name} [{user.id}] cancelled a running task.")
-        await update.message.reply_text("<b>Stopping active task...</b>", parse_mode='HTML')
+        await update.message.reply_text("<b>Stopping active task...</b>")
     except Exception as e:
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
