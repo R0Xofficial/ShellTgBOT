@@ -169,7 +169,7 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         process.kill()
-        logger.info(f"User {user.name} [{user.id}] cancelled a running process.")
+        logger.info(f"User {user.full_name} [{user.id}] cancelled a running process.")
         await update.message.reply_text("<b>All active tasks for you have been stopped.</b>", parse_mode='HTML')
     except ProcessLookupError:
         await update.message.reply_text("The task finished just before it could be stopped.")
@@ -186,10 +186,10 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.add_sudo(target_id):
-            reply_template = f"Success: {user.name} [<code>{target_id}</code>] has been added to sudoers."
+            reply_template = f"Success: {user.full_name} [<code>{target_id}</code>] has been added to sudoers."
             logger.info(f"Owner {user.id} added {target_id} to sudo list.")
         else:
-            reply_template = f"Info: {user.name} [<code>{target_id}</code>] is already a sudoer."
+            reply_template = f"Info: {user.full_name} [<code>{target_id}</code>] is already a sudoer."
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
     except (IndexError, ValueError):
@@ -205,10 +205,10 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
         if db.del_sudo(target_id):
-            reply_template = f"Success: {user.name} [<code>{target_id}</code>] has been removed from sudoers."
+            reply_template = f"Success: {user.full_name} [<code>{target_id}</code>] has been removed from sudoers."
             logger.info(f"Owner {user.id} removed {target_id} from sudo list.")
         else:
-            reply_template = f"Info: {user.name} [<code>{target_id}</code>] was not found in sudoers."
+            reply_template = f"Info: {user.full_name} [<code>{target_id}</code>] was not found in sudoers."
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
     except (IndexError, ValueError):
