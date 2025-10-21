@@ -213,6 +213,26 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error while trying to cancel a task: {e}")
         await update.message.reply_text(f"An error occurred: {e}")
 
+async def stopalltasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user.id):
+        logger.warning(f"Unauthorized /stopalltasks attempt by {update.effective_user.name} [{update.effective_user.id}]")
+        return
+
+    active_tasks = context.bot_data.get('running_tasks', {})
+    if not active_tasks:
+        await update.message.reply_text("There are no active tasks to stop.")
+        return
+
+    stopped_count = 0
+
+    for task in list(active_tasks.values()):
+        if not task.done():
+            task.cancel()
+            stopped_count += 1
+    
+    logger.info(f"Owner stopped {stopped_count} active task(s).")
+    await update.message.reply_text(f"<b>Attempted to stop all {stopped_count} active tasks.</b>", parse_mode='HTML')
+
 async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     if not is_owner(update.effective_user.id):
         logger.warning(f"Unauthorized /addsudo attempt by {update.effective_user.name} [{update.effective_user.id}]")
@@ -296,6 +316,7 @@ def main():
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
     application.add_handler(CommandHandler("stoptasks", stoptasks_command))
+    application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
     
     logger.info("Bot is starting...")
     application.run_polling()
