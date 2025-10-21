@@ -1,6 +1,6 @@
 import os
 import logging
-import subprocess
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 from io import BytesIO
@@ -19,6 +19,7 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 TELEGRAM_MESSAGE_LIMIT = 4096
+COMMAND_TIMEOUT = 120 # Seconds
 
 # --- LOGGING SETUP ---
 logging.basicConfig(
@@ -52,7 +53,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_authorized(user_id):
         await update.message.reply_text("Welcome, authorized user. Use /shell or /sh to execute commands.")
     else:
-        # Bot remains silent for unauthorized users, but logs the attempt
         logger.warning(f"Unauthorized /start attempt by {update.effective_user.name} [{user_id}]")
 
 async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -80,31 +80,42 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /shell <command>")
         return
 
+    # --- Send feedback message and store it to delete later ---
+    executing_template = "<code>Executing...</code>"
+    clean_text, entities = build_text_with_entities(executing_template)
+    feedback_message = await update.message.reply_text(text=clean_text, entities=entities)
+
     logger.info(f"Executing command: '{command_to_run}' for user {user.name} [{user.id}]")
     
     try:
-        # Execute the command
-        process = subprocess.run(
+        # --- Asynchronously execute the shell command ---
+        process = await asyncio.create_subprocess_shell(
             command_to_run,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=120
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
-        stdout = process.stdout
-        stderr = process.stderr
+        
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=COMMAND_TIMEOUT)
+
+        stdout = stdout_bytes.decode('utf-8', errors='replace')
+        stderr = stderr_bytes.decode('utf-8', errors='replace')
+        
         output = ""
         if stdout:
-            output += f"--- STDOUT ---\n{stdout}\n"
+            output += stdout
         if stderr:
-            output += f"--- STDERR ---\n{stderr}\n"
-        if not output:
+            output += f"\n--- STDERR ---\n{stderr}"
+        if not output.strip():
             output = "Command executed with no output."
 
-    except subprocess.TimeoutExpired:
-        output = "Error: Command timed out after 120 seconds."
+    except asyncio.TimeoutError:
+        process.kill()
+        output = f"Error: Command timed out after {COMMAND_TIMEOUT} seconds."
     except Exception as e:
-        output = f"An error occurred: {e}"
+        output = f"An error occurred while executing the command: {e}"
+
+    # --- Delete the "Executing..." message ---
+    await feedback_message.delete()
 
     # --- Log to Owner ---
     log_status_text = "Executed successfully" if not stderr else "Executed with errors"
@@ -122,27 +133,25 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if not is_owner(user.id) or len(output) > 1000:
-        output_file = BytesIO(output.encode('utf-8'))
+        log_file_content = f"Command: {command_to_run}\n\n--- OUTPUT ---\n{output}"
+        output_file = BytesIO(log_file_content.encode('utf-8'))
         output_file.name = f"Shell_{update.effective_message.message_id}.txt"
         clean_caption, caption_entities = build_text_with_entities(log_template_to_owner)
         await context.bot.send_document(
-            chat_id=OWNER_ID,
-            document=output_file,
-            caption=clean_caption,
-            caption_entities=caption_entities
+            chat_id=OWNER_ID, document=output_file, caption=clean_caption, caption_entities=caption_entities
         )
     else:
         await log_to_owner(context.bot, log_template_to_owner)
 
-    # --- Reply to User ---
-    if len(output) > TELEGRAM_MESSAGE_LIMIT:
-        output_file = BytesIO(output.encode('utf-8'))
-        output_file.name = f"Shell_{update.effective_message.message_id}.txt"
-        await update.message.reply_document(document=output_file, caption="Output was too long, sent as a file.")
+    # --- Reply to User with the new format ---
+    final_output = f"~$ {command_to_run}\n\n{output}"
+
+    if len(final_output) > TELEGRAM_MESSAGE_LIMIT:
+        output_file = BytesIO(final_output.encode('utf-8'))
+        output_file.name = f"Shell_output_{update.effective_message.message_id}.txt"
+        await update.message.reply_document(document=output_file, caption=f"Shell:\n<code>~$ {command_to_run}</code>")
     else:
-        # Use <pre> for expandable, fixed-width text block
-        # Your parser handles the content of <pre> without needing to escape it
-        reply_template = f"Shell:\n<pre>{output}</pre>"
+        reply_template = f"Shell:\n<pre>~$ {command_to_run}\n\n{output}</pre>"
         clean_text, entities = build_text_with_entities(reply_template)
         await update.message.reply_text(text=clean_text, entities=entities)
 
@@ -174,40 +183,4 @@ async def delsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /delsudo command. Only for owner."""
     user = update.effective_user
     if not is_owner(user.id):
-        logger.warning(f"Unauthorized /delsudo attempt by {user.name} [{user.id}]")
-        return
-
-    try:
-        target_id = int(context.args[0])
-        if db.del_sudo(target_id):
-            reply_template = f"Success: User [<code>{target_id}</code>] has been removed from sudoers."
-            logger.info(f"Owner {user.id} removed {target_id} from sudo list.")
-        else:
-            reply_template = f"Info: User [<code>{target_id}</code>] was not found in sudoers."
-
-        clean_text, entities = build_text_with_entities(reply_template)
-        await update.message.reply_text(text=clean_text, entities=entities)
-
-    except (IndexError, ValueError):
-        await update.message.reply_text("Usage: /delsudo <user_id>")
-    except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
-
-def main():
-    """Start the bot."""
-    if not TELEGRAM_BOT_TOKEN or not OWNER_ID:
-        raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_ID must be set in the .env file.")
-
-    db.init_db()
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler(["shell", "sh"], shell_command))
-    application.add_handler(CommandHandler("addsudo", addsudo_command))
-    application.add_handler(CommandHandler("delsudo", delsudo_command))
-
-    logger.info("Bot is starting...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+        logger.warning(f"Un
