@@ -5,11 +5,14 @@ def build_text_with_entities(text_template: str) -> (str, list[MessageEntity]):
     segments = []
     last_index = 0
 
+    # --- FIX: Added re.DOTALL flag ---
+    # This allows the content of tags (like <pre>) to span multiple lines.
     tag_regex = re.compile(
         r'<a href="([^"]+)">(.*?)</a>|'
         r'<a user_id="(\d+)">(.*?)</a>|'
         r'<emoji id="(\d+)">(.*?)</emoji>|'
-        r'<(b|i|u|s|spoiler|code|pre|q)>(.*?)</\7>'
+        r'<(b|i|u|s|spoiler|code|pre|q)>(.*?)</\7>',
+        re.DOTALL
     )
     
     for match in tag_regex.finditer(text_template):
@@ -21,7 +24,7 @@ def build_text_with_entities(text_template: str) -> (str, list[MessageEntity]):
             segments.append({'type': 'link', 'url': match.group(1), 'content': match.group(2)})
         elif match.group(3) is not None:
             segments.append({'type': 'mention', 'user_id': int(match.group(3)), 'content': match.group(4)})
-        elif match.group(5) is not None: # ZMIANA: Nowy warunek dla custom emoji
+        elif match.group(5) is not None:
             segments.append({'type': 'emoji', 'custom_emoji_id': match.group(5), 'content': match.group(6)})
         else:
             segments.append({'type': match.group(7), 'content': match.group(8)})
