@@ -96,7 +96,7 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- FIX 1: Use a global registry for all tasks ---
     context.bot_data.setdefault('active_shell_tasks', {})
     if user.id in context.bot_data['active_shell_tasks']:
-        await update.message.reply_text("A shell command is already running. Use /stoptasks to cancel.")
+        await update.message.reply_text("A shell command is already running. Use /stoptask to cancel.")
         return
 
     command_to_run = " ".join(context.args)
@@ -320,7 +320,7 @@ def main():
     application.add_handler(CommandHandler("addsudo", addsudo_command))
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
-    application.add_handler(CommandHandler("stoptasks", stoptasks_command))
+    application.add_handler(CommandHandler("stoptask", stoptasks_command))
     application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
     
     logger.info("Bot is starting...")
