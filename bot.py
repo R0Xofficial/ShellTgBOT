@@ -88,11 +88,14 @@ async def run_shell_process(command_to_run: str, context: ContextTypes.DEFAULT_T
 
 # --- MAIN COMMAND HANDLERS ---
 async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        logger.warning(f"Unauthorized shell attempt by {update.effective_user.name} [{update.effective_user.id}]")
+    user = update.effective_user
+    if not is_authorized(user.id):
+        logger.warning(f"Unauthorized shell attempt by {user.name} [{user.id}]")
         return
 
-    if context.user_data.get('running_task'):
+    # --- FIX 1: Use a global registry for all tasks ---
+    context.bot_data.setdefault('active_shell_tasks', {})
+    if user.id in context.bot_data['active_shell_tasks']:
         await update.message.reply_text("A shell command is already running. Use /stoptasks to cancel.")
         return
 
@@ -111,29 +114,27 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         task = asyncio.create_task(run_shell_process(command_to_run, context))
-        context.user_data['running_task'] = task
+        # --- FIX 1 (cont.): Store the task in the global registry ---
+        context.bot_data['active_shell_tasks'][user.id] = task
         output, return_code, log_status_text = await task
     except asyncio.CancelledError:
         output = "Task was cancelled by user."
         log_status_text = "Cancelled by user"
     finally:
-        if 'running_task' in context.user_data:
-            del context.user_data['running_task']
+        # --- FIX 1 (cont.): Clean up from the global registry ---
+        if user.id in context.bot_data.get('active_shell_tasks', {}):
+            del context.bot_data['active_shell_tasks'][user.id]
         await feedback_message.delete()
 
-    user = update.effective_user
     chat = update.effective_chat
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
-    # --- FIX: Enhanced chat info with a clickable message link ---
     chat_info_line = ""
     if chat.type != 'private':
         if chat.username:
-            # Public group/channel with a username
             message_link = f"https://t.me/{chat.username}/{update.effective_message.id}"
             chat_info_line = f"<b>Initiated in:</b> <a href=\"{message_link}\">{chat.title}</a> [<code>{chat.id}</code>]\n"
         else:
-            # Private supergroup (ID starts with -100)
             stripped_chat_id = str(chat.id).replace("-100", "")
             message_link = f"https://t.me/c/{stripped_chat_id}/{update.effective_message.id}"
             chat_info_line = f"<b>Initiated in:</b> <a href=\"{message_link}\">{chat.title}</a> [<code>{chat.id}</code>]\n"
@@ -200,7 +201,10 @@ async def stoptasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Unauthorized /stoptasks attempt by {user.name} [{user.id}]")
         return
 
-    task: Task = context.user_data.get('running_task')
+    # --- FIX 2: Read from the global task registry ---
+    active_tasks = context.bot_data.get('active_shell_tasks', {})
+    task: Task = active_tasks.get(user.id)
+    
     if not task or task.done():
         await update.message.reply_text("There are no active tasks to stop.")
         return
@@ -218,7 +222,8 @@ async def stopalltasks_command(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"Unauthorized /stopalltasks attempt by {update.effective_user.name} [{update.effective_user.id}]")
         return
 
-    active_tasks = context.bot_data.get('running_process', {})
+    # --- FIX 3: Read from the correct global registry ---
+    active_tasks = context.bot_data.get('active_shell_tasks', {})
     if not active_tasks:
         await update.message.reply_text("There are no active tasks to stop.")
         return
@@ -308,7 +313,7 @@ def main():
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     
-    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.COMMAND, ignore_edited_commands), group=-1)
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, ignore_edited_commands), group=-1)
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["shell", "sh"], shell_command))
@@ -316,7 +321,7 @@ def main():
     application.add_handler(CommandHandler("delsudo", delsudo_command))
     application.add_handler(CommandHandler("sudos", sudos_command))
     application.add_handler(CommandHandler("stoptasks", stoptasks_command))
-    # application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
+    application.add_handler(CommandHandler("stopalltasks", stopalltasks_command))
     
     logger.info("Bot is starting...")
     application.run_polling()
